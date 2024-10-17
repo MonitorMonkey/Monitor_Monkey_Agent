@@ -32,13 +32,11 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Check for API key argument
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <API_KEY>"
+# Check for API key in environment variable
+if [[ -z "${API_KEY:-}" ]]; then
+    echo "Error: API_KEY environment variable is not set."
     exit 1
 fi
-
-API_KEY="$1"
 
 # Create service user and group if they don't exist
 if ! getent group "$SERVICE_GROUP" > /dev/null; then
@@ -70,7 +68,7 @@ Description=Monitor Monkey Agent
 After=network.target
 
 [Service]
-Environment="API_KEY=$API_KEY"
+Environment="MONKEY_API_KEY=$API_KEY"
 ExecStart=$AGENT_BIN
 Restart=always
 RestartSec=5s
