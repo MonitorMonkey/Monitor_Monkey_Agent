@@ -8,6 +8,8 @@ AGENT_URL="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/
 AGENT_BIN="${DEPLOY_LOCATION}/monitor-monkey-agent"
 UNIT_FILE="/etc/systemd/system/monitor-monkey.service"
 UNIT_NAME="monitor-monkey.service"
+SERVICE_USER="monitor-monkey"
+SERVICE_GROUP="monitor-monkey"
 
 # Function to download file
 download_file() {
@@ -30,14 +32,25 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Ensure API key is set
-if [[ -z "${API_KEY:-}" ]]; then
-    echo "Error: API_KEY environment variable is not set."
+# Check for API key argument
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <API_KEY>"
     exit 1
 fi
 
-# Create deploy directory
+API_KEY="$1"
+
+# Create service user and group if they don't exist
+if ! getent group "$SERVICE_GROUP" > /dev/null; then
+    groupadd -r "$SERVICE_GROUP"
+fi
+if ! id "$SERVICE_USER" &>/dev/null; then
+    useradd -r -g "$SERVICE_GROUP" -s /sbin/nologin -d "$DEPLOY_LOCATION" "$SERVICE_USER"
+fi
+
+# Create deploy directory and set permissions
 mkdir -p "$DEPLOY_LOCATION"
+chown "$SERVICE_USER:$SERVICE_GROUP" "$DEPLOY_LOCATION"
 
 # Download agent
 echo "Downloading agent..."
@@ -47,6 +60,7 @@ if ! download_file "$AGENT_URL" "$AGENT_BIN"; then
 fi
 
 # Set permissions
+chown "$SERVICE_USER:$SERVICE_GROUP" "$AGENT_BIN"
 chmod 700 "$AGENT_BIN"
 
 # Create systemd unit file
@@ -56,12 +70,12 @@ Description=Monitor Monkey Agent
 After=network.target
 
 [Service]
-Environment="MONKEY_API_KEY=$API_KEY"
+Environment="API_KEY=$API_KEY"
 ExecStart=$AGENT_BIN
 Restart=always
 RestartSec=5s
-User=nobody
-Group=nogroup
+User=$SERVICE_USER
+Group=$SERVICE_GROUP
 
 [Install]
 WantedBy=multi-user.target
