@@ -65,7 +65,11 @@ func main() {
     // false will log to syslog, true will print to console
 
 
-    token := os.Args[1]
+    token := os.Getenv("MONKEY_API_KEY")
+	if token == "" {
+		fmt.Println("Error: API_KEY environment variable is not set")
+		os.Exit(1)
+	}
     authHeader := "token " + token
 	//change
 	endpoint := "http://192.168.1.126:8000/api/update/"

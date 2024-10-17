@@ -30,13 +30,11 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Check for API key argument
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <API_KEY>"
+# Ensure API key is set
+if [[ -z "${API_KEY:-}" ]]; then
+    echo "Error: API_KEY environment variable is not set."
     exit 1
 fi
-
-API_KEY="$1"
 
 # Create deploy directory
 mkdir -p "$DEPLOY_LOCATION"
@@ -58,7 +56,8 @@ Description=Monitor Monkey Agent
 After=network.target
 
 [Service]
-ExecStart=$AGENT_BIN $API_KEY
+Environment="MONKEY_API_KEY=$API_KEY"
+ExecStart=$AGENT_BIN
 Restart=always
 RestartSec=5s
 User=nobody
