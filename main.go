@@ -72,7 +72,7 @@ func main() {
 	}
     authHeader := "token " + token
 	//change
-	endpoint := "http://192.168.1.126:8000/api/update/"
+	endpoint := "https://monitormonkey.io/api/update/"
 
     client := &http.Client{}
 
