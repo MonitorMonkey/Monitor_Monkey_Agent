@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Configuration
 DEPLOY_LOCATION="/opt/monitor-monkey"
-AGENT_URL="https://github.com/oidz1234/go_monit_test/raw/master/monitor-monkey-agent"
+AGENT_URL="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent"
 AGENT_BIN="${DEPLOY_LOCATION}/monitor-monkey-agent"
 UNIT_FILE="/etc/systemd/system/monitor-monkey.service"
 UNIT_NAME="monitor-monkey.service"
