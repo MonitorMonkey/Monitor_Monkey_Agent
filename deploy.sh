@@ -9,6 +9,7 @@ AGENT_BIN="${DEPLOY_LOCATION}/monitor-monkey-agent"
 UNIT_FILE="/etc/systemd/system/monitor-monkey.service"
 UNIT_NAME="monitor-monkey.service"
 
+# Function to download file
 download_file() {
     local url="$1"
     local output="$2"
@@ -29,11 +30,13 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Ensure API key is set
-if [[ -z "${API_KEY:-}" ]]; then
-    echo "Error: API_KEY environment variable is not set."
+# Check for API key argument
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <API_KEY>"
     exit 1
 fi
+
+API_KEY="$1"
 
 # Create deploy directory
 mkdir -p "$DEPLOY_LOCATION"
