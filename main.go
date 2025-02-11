@@ -36,6 +36,7 @@ type mesure struct {
     UploadInterval uint64
     DownloadInterval uint64
     Services map[string]string
+	AgentVer string
 
 }
 
@@ -70,16 +71,19 @@ func main() {
 		fmt.Println("Error: API_KEY environment variable is not set")
 		os.Exit(1)
 	}
+	AgentVer := "0.1"
     authHeader := "token " + token
 	//change
 	endpoint := "https://monitormonkey.io/api/update/"
+	//endpoint := "http://192.168.1.172:8000/api/update/"
 
     client := &http.Client{}
 
 
     // TODO:
-    // these should be check on boot from the "config" api 
-    // this api does not yet exist
+    // Disks should be configured on agent boot for defaults
+	// e.g just send all disks
+	// then updates from api if need be.
     defaultDisks := []string{"/", "/home"}
     defaultServices := []string{"sshd", "httpd"} // liunx defaults again can be configured
 
@@ -120,6 +124,7 @@ func main() {
         m.Disks = diskmap
         m.Memory = monitors.GetMem()
         m.Upload, m.Download = monitors.GetNetStats()
+		m.AgentVer = AgentVer
         // TODO:
         // should do the caculation (new up - old up)
         // to get amount sent in given timeframe
