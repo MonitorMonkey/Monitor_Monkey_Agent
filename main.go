@@ -84,7 +84,9 @@ func main() {
     // Disks should be configured on agent boot for defaults
 	// e.g just send all disks
 	// then updates from api if need be.
-    defaultDisks := []string{"/", "/home"}
+
+    //defaultDisks := []string{"/", "/home"}
+    defaultDisks := monitors.GetTopUsedDisks(2)
     defaultServices := []string{"sshd", "httpd"} // liunx defaults again can be configured
 
 
@@ -114,6 +116,7 @@ func main() {
         //fmt.Printf("Heartbeat (unix)time %v\n", time.Now().Unix())
 
         m.Hostid, m.Hostname, m.Uptime, m.Os, m.Platform, m.Ip = monitors.GetHostDetails()
+
         m.Temp = monitors.GetTemp()
 
         m.Load = monitors.GetLoad(loadmap)

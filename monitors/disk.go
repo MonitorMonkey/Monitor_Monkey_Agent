@@ -1,71 +1,132 @@
 // disk.go
-// gets disk info
-
 package monitors
 
 import (
-    "fmt"
     "github.com/shirou/gopsutil/v3/disk"
+    "sort"
+    "strings"
 )
 
+type DiskUsageInfo struct {
+    Path        string
+    UsedPercent float64
+    DeviceID    string  // Store the physical device ID
+}
 
-/*
-
-func GetDefaultDisks(amount int) []uint64 {
-    // get list of all disks ✅
-    // figure out total space of all disks
-    // figure out the top X by space
-    // return them
-    parts, err := disk.Partitions(false)
+func GetTopUsedDisks(count int) []string {
+    // Get all partitions
+    partitions, err := disk.Partitions(true)  // Changed to true to get all partition info
     if err != nil {
-        fmt.Println(err)
+        return []string{"/"}
     }
-    fmt.Println(parts)
 
-    var diskSizes []uint64
-    // init the slice to hold our largest disks
-    largestDisks := make([]uint64, amount)
+    var diskUsages []DiskUsageInfo
+    seenDevices := make(map[string]bool)  // Track unique physical devices
     
+    // Get usage for each partition
+    for _, partition := range partitions {
+        // Skip special filesystems
+        if isSpecialFS(partition.Fstype) {
+            continue
+        }
 
-    for _, disk := range parts {
-        path := disk.Mountpoint
-        diskSizes = append(diskSizes, GetDiskSize(path))
-    }
-
-
-    for _, size := range diskSizes {
-        // if the current number is larger than the smallest largest number,
-        // replace the smallest largest number with the current number
-        if size > largestDisks[0] {
-            largestDisks[0] = size
-            // sort the largest slice in descending order
-        //    sort.Sort(sort.Reverse(sort.IntSlice(largestDisks)))
+        // Extract the base device (e.g., /dev/sda from /dev/sda1)
+        baseDevice := getBaseDevice(partition.Device)
+        
+        // Skip if we've already seen this physical device
+        if seenDevices[baseDevice] {
+            continue
+        }
+        
+        usage, err := disk.Usage(partition.Mountpoint)
+        if err != nil {
+            continue
+        }
+        
+        // Only consider if it has actual storage
+        if usage.Total > 0 {
+            diskUsages = append(diskUsages, DiskUsageInfo{
+                Path:        partition.Mountpoint,
+                UsedPercent: usage.UsedPercent,
+                DeviceID:    baseDevice,
+            })
+            seenDevices[baseDevice] = true
         }
     }
-    return largestDisks
 
+    // Sort by usage percentage in descending order
+    sort.Slice(diskUsages, func(i, j int) bool {
+        return diskUsages[i].UsedPercent > diskUsages[j].UsedPercent
+    })
+
+    // Get the top N paths
+    result := make([]string, 0, count)
+    for i := 0; i < count && i < len(diskUsages); i++ {
+        result = append(result, diskUsages[i].Path)
+    }
+
+    // If we found no valid disks, return root as fallback
+    if len(result) == 0 {
+        return []string{"/"}
+    }
+
+    return result
 }
-*/
 
+// Helper function to get the base device name
+func getBaseDevice(device string) string {
+    // Handle cases like /dev/sda1, /dev/nvme0n1p1, etc.
+    device = strings.TrimSpace(device)
+    
+    // Handle NVMe drives
+    if strings.Contains(device, "nvme") {
+        parts := strings.Split(device, "p")
+        if len(parts) > 1 {
+            return parts[0]
+        }
+    }
+    
+    // Handle traditional drives (sda, hda, etc.)
+    for i := len(device) - 1; i >= 0; i-- {
+        if device[i] < '0' || device[i] > '9' {
+            return device[:i+1]
+        }
+    }
+    
+    return device
+}
 
+// Helper function to skip special filesystems
+func isSpecialFS(fstype string) bool {
+    specialFS := map[string]bool{
+        "devfs":     true,
+        "tmpfs":     true,
+        "devtmpfs":  true,
+        "proc":      true,
+        "sysfs":     true,
+        "debugfs":   true,
+        "cgroup":    true,
+        "securityfs": true,
+        "fusectl":   true,
+        "pstore":    true,
+        "bpf":       true,
+        "hugetlbfs": true,
+    }
+    return specialFS[fstype]
+}
 
 func GetDiskUsage(diskPath string) float64 {
-
     diskStat, err := disk.Usage(diskPath)
     if err != nil {
-        fmt.Println(err)
-        // we dont' want this to crash if we don't have a disk so we just return 0
         return 0.0
     }
     return diskStat.UsedPercent
 }
 
 func GetDiskSize(diskPath string) uint64 {
-
     diskStat, err := disk.Usage(diskPath)
     if err != nil {
-        fmt.Println(err)
+        return 0
     }
     return diskStat.Total
 }
-
