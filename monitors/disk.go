@@ -111,8 +111,17 @@ func isSpecialFS(fstype string) bool {
         "pstore":    true,
         "bpf":       true,
         "hugetlbfs": true,
+		"squashfs":  true,  // Used by snaps
+		"overlay":   true,  // Used by containers and some snap systems
+		"fuse":      true,  // FUSE filesystems
+		"ecryptfs":  true,  // Encrypted filesystems
+		"autofs":    true,  // Automounted filesystems
+		"mqueue":    true,  // Message queue filesystem
+		"configfs":  true,  // Kernel config filesystem
     }
-    return specialFS[fstype]
+    return specialFS[fstype] || 
+           strings.HasPrefix(fstype, "fuse.") || // Catch all FUSE-based filesystems
+           strings.Contains(fstype, "snap")      // Catch any snap-related filesystems
 }
 
 func GetDiskUsage(diskPath string) float64 {

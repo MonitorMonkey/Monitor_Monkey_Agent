@@ -71,7 +71,7 @@ func main() {
 		fmt.Println("Error: API_KEY environment variable is not set")
 		os.Exit(1)
 	}
-	AgentVer := "0.1"
+	AgentVer := "0.2"
     authHeader := "token " + token
 	//change
 	endpoint := "https://monitormonkey.io/api/update/"
