@@ -71,11 +71,16 @@ func main() {
 		fmt.Println("Error: API_KEY environment variable is not set")
 		os.Exit(1)
 	}
-	AgentVer := "0.2"
+	AgentVer := "0.3"
     authHeader := "token " + token
 	//change
-	endpoint := "https://monitormonkey.io/api/update/"
-	//endpoint := "http://192.168.1.172:8000/api/update/"
+	const baseURL = "https://monitormonkey.io"
+	//const baseURL = "http://192.168.1.172:8000"
+
+	var (
+		updateApi  = baseURL + "/api/update/"
+		confApi = baseURL + "/api/configure/"
+	)
 
     client := &http.Client{}
 
@@ -91,13 +96,75 @@ func main() {
 
 
     
+	// Fetch configuration from API if it's configured
+	// This is so we don't send 1 instance of non custom conf
+	// Prepare the request payload with host details
+	// Retrieve host details
+	Hostid, Hostname, Uptime, Os, Platform, Ip := monitors.GetHostDetails()
+
+	// Prepare the request payload with host details
+	hostDetails := map[string]interface{}{
+		"Hostid":   Hostid,
+		"Hostname": Hostname,
+		"Uptime":   Uptime,
+		"Os":       Os,
+		"Platform": Platform,
+		"Ip":       Ip,
+	}
+
+	jsonPayload, err := json.Marshal(hostDetails)
+	if err != nil {
+		log(err)
+	}
+
+	// Create a POST request with host details
+	req, err := http.NewRequest("POST", confApi, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log(err)
+	}
+	req.Header.Set("Authorization", authHeader)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log(err)
+	} else {
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log(err)
+		} else {
+			var confResponse map[string]interface{}
+			err = json.Unmarshal(body, &confResponse)
+			if err != nil {
+				log(err)
+			} else {
+				if value, ok := confResponse["message"]; ok && value == "noconf" {
+					fmt.Println("No configuration changes needed.")
+				} else {
+					var custom Custom
+					err = json.Unmarshal(body, &custom)
+					if err != nil {
+						log(err)
+					}
+					if custom.Disks != nil {
+						defaultDisks = custom.Disks
+					}
+					if custom.Services != nil {
+						defaultServices = custom.Services
+					}
+				}
+			}
+		}
+	}
 
 
+	// update interval
     interval := 5
 
     var oldUpload, oldDownload uint64 = 0, 0
 
-    if helpers.CheckEndpoint(endpoint) == true {
+    if helpers.CheckEndpoint(updateApi) == true {
         fmt.Println("the endpoint is alive")
     }
 
@@ -154,7 +221,7 @@ func main() {
         }
         //fmt.Println(string(jsonBytes))
 
-        req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonBytes))
+        req, err := http.NewRequest("POST", updateApi, bytes.NewBuffer(jsonBytes))
         req.Header.Set("Content-Type", "application/json")
         req.Header.Set("Content-Type", "application/json")
         req.Header.Set("Authorization", authHeader)
