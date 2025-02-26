@@ -71,7 +71,7 @@ func main() {
 		fmt.Println("Error: API_KEY environment variable is not set")
 		os.Exit(1)
 	}
-	AgentVer := "0.3"
+	AgentVer := "0.4"
     authHeader := "token " + token
 	//change
 	const baseURL = "https://monitormonkey.io"
@@ -162,7 +162,14 @@ func main() {
 	// update interval
     interval := 5
 
+	// Get initial network stats to establish a baseline
+	initialUpload, initialDownload := monitors.GetNetStats()
+
     var oldUpload, oldDownload uint64 = 0, 0
+	oldUpload, oldDownload = initialUpload, initialDownload
+
+	fmt.Println("Initializing network monitoring... waiting for first interval")
+	time.Sleep(time.Duration(interval) * time.Second)
 
     if helpers.CheckEndpoint(updateApi) == true {
         fmt.Println("the endpoint is alive")
