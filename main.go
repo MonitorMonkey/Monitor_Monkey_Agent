@@ -71,11 +71,11 @@ func main() {
 		fmt.Println("Error: API_KEY environment variable is not set")
 		os.Exit(1)
 	}
-	AgentVer := "0.4"
+	AgentVer := "0.4.1"
     authHeader := "token " + token
 	//change
 	const baseURL = "https://monitormonkey.io"
-	//const baseURL = "http://192.168.1.172:8000"
+//	const baseURL = "http://192.168.1.172:8000"
 
 	var (
 		updateApi  = baseURL + "/api/update/"
@@ -92,7 +92,7 @@ func main() {
 
     //defaultDisks := []string{"/", "/home"}
     defaultDisks := monitors.GetTopUsedDisks(2)
-    defaultServices := []string{"sshd", "httpd"} // liunx defaults again can be configured
+    defaultServices := []string{"sshd", "monitor-monkey"} // liunx defaults again can be configured
 
 
     
