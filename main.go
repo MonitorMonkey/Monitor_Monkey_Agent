@@ -1,3 +1,5 @@
+// agent version history
+// 0.5 - net now excludes loopback
 package main
 
 import (
@@ -68,14 +70,14 @@ func main() {
 
     token := os.Getenv("MONKEY_API_KEY")
 	if token == "" {
-		fmt.Println("Error: API_KEY environment variable is not set")
+		fmt.Println("Error: MONKEY_API_KEY environment variable is not set")
 		os.Exit(1)
 	}
-	AgentVer := "0.4.1"
+	AgentVer := "0.5.0"
     authHeader := "token " + token
 	//change
 	const baseURL = "https://monitormonkey.io"
-//	const baseURL = "http://192.168.1.172:8000"
+	//const baseURL = "http://192.168.1.172:8000"
 
 	var (
 		updateApi  = baseURL + "/api/update/"

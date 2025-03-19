@@ -3,39 +3,31 @@ package monitors
 import (
     "fmt"
     "github.com/shirou/gopsutil/v3/net"
+    "strings"
 )
 
-
 func GetNetStats() (uint64, uint64) {
-    nstats, err := net.IOCounters(false)
+    // Get stats for all interfaces (true = per interface)
+    nstats, err := net.IOCounters(true)
     if err != nil {
         fmt.Println(err)
+        return 0, 0
     }
-    /*
-   new_upload := nstats[0].BytesSent
-   new_download := nstats[0].BytesRecv
-   fmt.Printf("Old upload is %v, new upload is %v\n", old_upload, new_upload)
 
-   current_upload := new_upload - old_upload
-   current_download := new_download - old_download
+    var total_upload uint64 = 0
+    var total_download uint64 = 0
 
-   return current_upload, current_download
-   */
-   total_upload := nstats[0].BytesSent
-   total_download := nstats[0].BytesRecv
-
-   return total_upload, total_download
-
-
-
-}
-
-/*
-func GetNetStats() {
-    nstats, err := net.IOCounters(false)
-    if err != nil {
-        fmt.Println(err)
+    // Iterate through all interfaces and sum up the stats
+    // Skip the loopback interface (typically named "lo")
+    for _, stat := range nstats {
+        // Skip loopback interface (usually named "lo" on Linux, "lo0" on macOS)
+        if strings.Contains(strings.ToLower(stat.Name), "lo") {
+            continue
+        }
+        
+        total_upload += stat.BytesSent
+        total_download += stat.BytesRecv
     }
-    fmt.Println(nstats[0].BytesSent)
+
+    return total_upload, total_download
 }
-*/
