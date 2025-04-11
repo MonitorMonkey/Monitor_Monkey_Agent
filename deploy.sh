@@ -4,7 +4,8 @@ set -euo pipefail
 
 # Configuration
 DEPLOY_LOCATION="/opt/monitor-monkey"
-AGENT_URL="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent"
+AGENT_URL_X86="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent"
+AGENT_URL_ARM="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent-arm"
 AGENT_BIN="${DEPLOY_LOCATION}/monitor-monkey-agent"
 UNIT_FILE="/etc/systemd/system/monitor-monkey.service"
 UNIT_NAME="monitor-monkey.service"
@@ -38,6 +39,16 @@ if [[ -z "${API_KEY:-}" ]]; then
     exit 1
 fi
 
+# Detect ARM architecture
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm"* || "$ARCH" == "aarch64" ]]; then
+    echo "ARM architecture detected: $ARCH"
+    AGENT_URL="$AGENT_URL_ARM"
+else
+    echo "x86 architecture detected: $ARCH"
+    AGENT_URL="$AGENT_URL_X86"
+fi
+
 # Create service user and group if they don't exist
 if ! getent group "$SERVICE_GROUP" > /dev/null; then
     groupadd -r "$SERVICE_GROUP"
@@ -51,7 +62,7 @@ mkdir -p "$DEPLOY_LOCATION"
 chown "$SERVICE_USER:$SERVICE_GROUP" "$DEPLOY_LOCATION"
 
 # Download agent
-echo "Downloading agent..."
+echo "Downloading agent from $AGENT_URL..."
 if ! download_file "$AGENT_URL" "$AGENT_BIN"; then
     echo "Error: Failed to download agent."
     exit 1
