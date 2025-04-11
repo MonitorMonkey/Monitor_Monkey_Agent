@@ -7,7 +7,8 @@ set -euo pipefail
 
 # Configuration (matching deploy.sh)
 DEPLOY_LOCATION="/opt/monitor-monkey"
-AGENT_URL="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent"
+AGENT_URL_X86="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent"
+AGENT_URL_ARM="https://github.com/MonitorMonkey/Monitor_Monkey_Agent/raw/refs/heads/master/monitor-monkey-agent-arm"
 AGENT_BIN="${DEPLOY_LOCATION}/monitor-monkey-agent"
 BACKUP_BIN="${DEPLOY_LOCATION}/monitor-monkey-agent.bak"
 UNIT_NAME="monitor-monkey.service"
@@ -45,6 +46,16 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Detect ARM architecture
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm"* || "$ARCH" == "aarch64" ]]; then
+    echo "ARM architecture detected: $ARCH"
+    AGENT_URL="$AGENT_URL_ARM"
+else
+    echo "x86 architecture detected: $ARCH"
+    AGENT_URL="$AGENT_URL_X86"
+fi
+
 # Check if the service exists
 if ! systemctl status "$UNIT_NAME" &>/dev/null; then
     echo "Error: Monitor Monkey service not found. Please run the deployment script first."
@@ -70,7 +81,7 @@ if [ -f "$AGENT_BIN" ]; then
 fi
 
 # Download the latest agent
-echo "Downloading the latest agent..."
+echo "Downloading the latest agent from $AGENT_URL..."
 if ! download_file "$AGENT_URL" "$AGENT_BIN"; then
     echo "Error: Failed to download agent. Restoring backup..."
     if [ -f "$BACKUP_BIN" ]; then
@@ -126,4 +137,3 @@ else
     fi
     exit 1
 fi
-
