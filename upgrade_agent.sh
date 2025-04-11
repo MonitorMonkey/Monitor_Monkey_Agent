@@ -46,7 +46,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Check if the service exists
-if ! systemctl list-unit-files | grep -q "$UNIT_NAME"; then
+if ! systemctl list-unit-files --type=service | grep -Fq "$UNIT_NAME"; then
     echo "Error: Monitor Monkey service not found. Please run the deployment script first."
     exit 1
 fi
@@ -126,3 +126,4 @@ else
     fi
     exit 1
 fi
+
