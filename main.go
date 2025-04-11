@@ -1,6 +1,7 @@
 // agent version history
 // 0.5 - net now excludes loopback
 // 0.6.0 - now displays --version and --status to support upgrade script
+// 0.6.1 - Memory optimisation
 package main
 
 import (
@@ -14,10 +15,11 @@ import (
     "os"
     "io"
     "flag"
+    "runtime/debug"
 )
 
 // Version information
-const AgentVersion = "0.6.0"
+const AgentVersion = "0.6.1" 
 
 type Custom struct {
     Disks []string
@@ -63,6 +65,16 @@ func log(to_log error) {
 }
 
 func main() {
+    // Set up a recovery function to prevent crashes
+    defer func() {
+        if r := recover(); r != nil {
+            fmt.Println("Recovered from panic:", r)
+            fmt.Println(string(debug.Stack()))
+            time.Sleep(time.Second * 10)
+            main() // Restart the main function
+        }
+    }()
+
     // Parse command line arguments
     versionFlag := flag.Bool("version", false, "Display agent version")
     statusFlag := flag.Bool("status", false, "Display agent status")
@@ -112,7 +124,16 @@ func main() {
         confApi = baseURL + "/api/configure/"
     )
 
-    client := &http.Client{}
+    // Create an HTTP client with timeout settings to prevent connection leaks
+    client := &http.Client{
+        Timeout: 30 * time.Second,
+        Transport: &http.Transport{
+            MaxIdleConns:        100,
+            MaxIdleConnsPerHost: 20,
+            IdleConnTimeout:     90 * time.Second,
+            DisableKeepAlives:   false,
+        },
+    }
 
     // TODO:
     // Disks should be configured on agent boot for defaults
@@ -121,7 +142,7 @@ func main() {
 
     //defaultDisks := []string{"/", "/home"}
     defaultDisks := monitors.GetTopUsedDisks(2)
-    defaultServices := []string{"sshd", "monitor-monkey"} // liunx defaults again can be configured
+    defaultServices := []string{"sshd", "monitor-monkey"} // linux defaults again can be configured
 
     // Fetch configuration from API if it's configured
     // This is so we don't send 1 instance of non custom conf
@@ -148,37 +169,38 @@ func main() {
     req, err := http.NewRequest("POST", confApi, bytes.NewBuffer(jsonPayload))
     if err != nil {
         log(err)
-    }
-    req.Header.Set("Authorization", authHeader)
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := client.Do(req)
-    if err != nil {
-        log(err)
     } else {
-        defer resp.Body.Close()
-        body, err := io.ReadAll(resp.Body)
+        req.Header.Set("Authorization", authHeader)
+        req.Header.Set("Content-Type", "application/json")
+
+        resp, err := client.Do(req)
         if err != nil {
             log(err)
         } else {
-            var confResponse map[string]interface{}
-            err = json.Unmarshal(body, &confResponse)
+            defer resp.Body.Close()
+            body, err := io.ReadAll(resp.Body)
             if err != nil {
                 log(err)
             } else {
-                if value, ok := confResponse["message"]; ok && value == "noconf" {
-                    fmt.Println("No configuration changes needed.")
+                var confResponse map[string]interface{}
+                err = json.Unmarshal(body, &confResponse)
+                if err != nil {
+                    log(err)
                 } else {
-                    var custom Custom
-                    err = json.Unmarshal(body, &custom)
-                    if err != nil {
-                        log(err)
-                    }
-                    if custom.Disks != nil {
-                        defaultDisks = custom.Disks
-                    }
-                    if custom.Services != nil {
-                        defaultServices = custom.Services
+                    if value, ok := confResponse["message"]; ok && value == "noconf" {
+                        fmt.Println("No configuration changes needed.")
+                    } else {
+                        var custom Custom
+                        err = json.Unmarshal(body, &custom)
+                        if err != nil {
+                            log(err)
+                        }
+                        if custom.Disks != nil {
+                            defaultDisks = custom.Disks
+                        }
+                        if custom.Services != nil {
+                            defaultServices = custom.Services
+                        }
                     }
                 }
             }
@@ -197,11 +219,27 @@ func main() {
     fmt.Println("Initializing network monitoring... waiting for first interval")
     time.Sleep(time.Duration(interval) * time.Second)
 
-    if helpers.CheckEndpoint(updateApi) == true {
-        fmt.Println("The endpoint is alive")
+    // Check endpoint with a controlled number of retries
+    isAlive := false
+    for i := 0; i < 3; i++ { // Limit retries to avoid resource exhaustion
+        if helpers.CheckEndpoint(updateApi) {
+            fmt.Println("The endpoint is alive")
+            isAlive = true
+            break
+        }
+        time.Sleep(time.Second * 5)
     }
+    
+    if !isAlive {
+        fmt.Println("Warning: Endpoint check failed, but continuing operation")
+    }
+    
+    // Force garbage collection before entering main loop
+    debug.FreeOSMemory()
 
+    // Main monitoring loop
     for {
+        // Create maps each iteration
         loadmap := make(map[string]float64)
         diskmap := make(map[string]float64)
         servicemap := make(map[string]string)
@@ -209,12 +247,9 @@ func main() {
         m := mesure{}
         heartbeat := time.Now().Unix()
         m.Heartbeat = heartbeat
-        //fmt.Printf("Heartbeat (unix)time %v\n", time.Now().Unix())
 
         m.Hostid, m.Hostname, m.Uptime, m.Os, m.Platform, m.Ip = monitors.GetHostDetails()
-
         m.Temp = monitors.GetTemp()
-
         m.Load = monitors.GetLoad(loadmap)
 
         for _, disk := range defaultDisks {
@@ -224,53 +259,57 @@ func main() {
         m.Memory = monitors.GetMem()
         m.Upload, m.Download = monitors.GetNetStats()
         m.AgentVer = AgentVersion
-        // TODO:
-        // should do the caculation (new up - old up)
-        // to get amount sent in given timeframe
-        // but that does not want to work
-        // so will do it api side for now
+        
         m.UploadInterval = m.Upload - oldUpload
         m.DownloadInterval = m.Download - oldDownload
+        
         for _, service := range defaultServices {
-            //fmt.Printf("Service %v %v\n", service, monitors.ServiceCheck(service))
             servicemap[service] = monitors.ServiceCheck(service)
         }
         m.Services = servicemap
-        // TODO:
-        // Implement 
-        //monitors.GetIOWait()
 
         jsonBytes, err := json.Marshal(m)
-
         if err != nil {
             log(err)
+            time.Sleep(time.Duration(interval) * time.Second)
+            continue
         }
-        //fmt.Println(string(jsonBytes))
 
+        // Create and send the request
         req, err := http.NewRequest("POST", updateApi, bytes.NewBuffer(jsonBytes))
+        if err != nil {
+            log(err)
+            time.Sleep(time.Duration(interval) * time.Second)
+            continue
+        }
+        
         req.Header.Set("Content-Type", "application/json")
         req.Header.Set("Authorization", authHeader)
 
         resp, err := client.Do(req)
         if err != nil {
             log(err)
-            // TODO: if panic here, just sleep and try again (if api serv is down)
-            //TODO: Test if panic is fine, systemd can deal with it.
+            time.Sleep(time.Duration(interval) * time.Second)
+            continue
         }
-        defer resp.Body.Close()
-
-        // Read the response body
+        
+        // Always close the body to prevent resource leaks
         body, err := io.ReadAll(resp.Body)
+        resp.Body.Close() // Explicitly close rather than defer to avoid accumulation
+
         if err != nil {
-            panic(err)
+            log(err)
+            time.Sleep(time.Duration(interval) * time.Second)
+            continue
         }
-        defer resp.Body.Close()
 
         // Unmarshal into responseMap
         var responseMap map[string]interface{}
         err = json.Unmarshal(body, &responseMap)
         if err != nil {
-            panic(err)
+            log(err)
+            time.Sleep(time.Duration(interval) * time.Second)
+            continue
         }
 
         // Check for "tomany" message
@@ -293,9 +332,17 @@ func main() {
                 defaultServices = custom.Services
             }
 
-            //fmt.Println("ran successful")
             oldUpload = m.Upload
             oldDownload = m.Download
+
+            // Explicitly clear out old data structures to help garbage collection
+            body = nil
+            jsonBytes = nil
+            
+            // Trigger garbage collection periodically
+            if heartbeat % 60 == 0 {  // Every minute
+                debug.FreeOSMemory()
+            }
 
             time.Sleep(time.Duration(interval) * time.Second)
         }
