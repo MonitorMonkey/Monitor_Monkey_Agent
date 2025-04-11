@@ -105,7 +105,7 @@ func main() {
     authHeader := "token " + token
     //change
     const baseURL = "https://monitormonkey.io"
-    //const baseURL = "http://192.168.1.172:8000"
+    //const baseURL = "http://192.168.1.131:8000"
 
     var (
         updateApi  = baseURL + "/api/update/"
