@@ -2,12 +2,14 @@
 // 0.5 - net now excludes loopback
 // 0.6.0 - now displays --version and --status to support upgrade script
 // 0.6.1 - Memory optimisation
+// 0.6.2 - Added open ports event monitoring
 package main
 
 import (
     "fmt"
     "go_monitor/monitors"
     "go_monitor/helpers"
+    "go_monitor/events" // Import the events package
     "time"
     "encoding/json"
     "net/http"
@@ -19,7 +21,7 @@ import (
 )
 
 // Version information
-const AgentVersion = "0.6.1" 
+const AgentVersion = "0.6.2" 
 
 type Custom struct {
     Disks []string
@@ -62,6 +64,68 @@ func log(to_log error) {
         syslog.Err(to_log.Error())
     }
     */
+}
+
+// sendOpenPortsEvent gets open ports information and sends it to the events API
+func sendOpenPortsEvent(client *http.Client, baseURL string, authHeader string) {
+    // Get host ID and other details
+    hostid, _, _, _, _, _ := monitors.GetHostDetails()
+    
+    // Get open ports data
+    jsonData, err := events.GetOpenPortsJSON()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error getting open ports: %v\n", err)
+        return
+    }
+    
+    // Parse the JSON string back to a map for embedding in event data
+    var portsData interface{}
+    err = json.Unmarshal([]byte(jsonData), &portsData)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error parsing ports data: %v\n", err)
+        return
+    }
+    
+    // Create event payload
+    eventPayload := map[string]interface{}{
+        "Hostid":     hostid,
+        "EventType":  "open_ports",
+        "EventData":  portsData,
+    }
+    
+    // Marshal the payload
+    jsonBytes, err := json.Marshal(eventPayload)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error marshaling event data: %v\n", err)
+        return
+    }
+    
+    // Create and send the request
+    eventsApi := baseURL + "/api/events/"
+    req, err := http.NewRequest("POST", eventsApi, bytes.NewBuffer(jsonBytes))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+        return
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", authHeader)
+    
+    resp, err := client.Do(req)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error sending event: %v\n", err)
+        return
+    }
+    defer resp.Body.Close()
+    
+    // Log success or failure
+    if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+        fmt.Printf("Successfully sent open ports event at %s\n", time.Now().Format(time.RFC3339))
+    } else {
+        body, _ := io.ReadAll(resp.Body)
+        fmt.Fprintf(os.Stderr, "Failed to send event. Status: %d, Response: %s\n", 
+            resp.StatusCode, string(body))
+    }
 }
 
 func main() {
@@ -116,8 +180,8 @@ func main() {
     
     authHeader := "token " + token
     //change
-    const baseURL = "https://monitormonkey.io"
-    //const baseURL = "http://192.168.1.131:8000"
+    //const baseURL = "https://monitormonkey.io"
+    const baseURL = "http://192.168.1.131:8000"
 
     var (
         updateApi  = baseURL + "/api/update/"
@@ -236,6 +300,12 @@ func main() {
     
     // Force garbage collection before entering main loop
     debug.FreeOSMemory()
+    
+    // Create a ticker for the open ports reporting (every 30 seconds)
+    portsTicker := time.NewTicker(30 * time.Second) // make this once a day ai!
+    
+    // Run open ports check immediately once at startup
+    go sendOpenPortsEvent(client, baseURL, authHeader)
 
     // Main monitoring loop
     for {
@@ -342,6 +412,14 @@ func main() {
             // Trigger garbage collection periodically
             if heartbeat % 60 == 0 {  // Every minute
                 debug.FreeOSMemory()
+            }
+            
+            // Check if it's time to send open ports event (non-blocking)
+            select {
+            case <-portsTicker.C:
+                go sendOpenPortsEvent(client, baseURL, authHeader) // Run in a goroutine to avoid blocking the main loop
+            default:
+                // Continue with the main loop
             }
 
             time.Sleep(time.Duration(interval) * time.Second)
