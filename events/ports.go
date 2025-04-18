@@ -1,4 +1,4 @@
-package main
+package events
 
 import (
     "bufio"
@@ -130,7 +130,8 @@ func getOpenPorts(procFile string, isTCP bool) ([]int, error) {
     return portList, nil
 }
 
-func main() {
+// GetOpenPorts returns information about open TCP and UDP ports.
+func GetOpenPorts() (OpenPorts, error) {
     // Load service mappings from /etc/services
     tcpServices, udpServices, err := loadServices()
     if err != nil {
@@ -200,13 +201,21 @@ func main() {
         UDP: udpPortInfos,
     }
 
+    return openPorts, nil
+}
+
+// GetOpenPortsJSON returns open ports information as a formatted JSON string
+func GetOpenPortsJSON() (string, error) {
+    openPorts, err := GetOpenPorts()
+    if err != nil {
+        return "", err
+    }
+
     // Marshal the struct to JSON
     jsonData, err := json.MarshalIndent(openPorts, "", "  ")
     if err != nil {
-        fmt.Fprintf(os.Stderr, "Error marshaling JSON: %v\n", err)
-        os.Exit(1)
+        return "", err
     }
 
-    // Output the JSON
-    fmt.Println(string(jsonData))
+    return string(jsonData), nil
 }

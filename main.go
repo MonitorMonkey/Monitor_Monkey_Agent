@@ -180,8 +180,8 @@ func main() {
     
     authHeader := "token " + token
     //change
-    //const baseURL = "https://monitormonkey.io"
-    const baseURL = "http://192.168.1.131:8000"
+    const baseURL = "https://monitormonkey.io"
+    //const baseURL = "http://192.168.1.131:8000"
 
     var (
         updateApi  = baseURL + "/api/update/"
@@ -302,6 +302,8 @@ func main() {
     debug.FreeOSMemory()
     
     // Create a ticker for the open ports reporting (once per day)
+	// unsure if do little but we see!
+	// well it also do it on boot so maybe fine?
     portsTicker := time.NewTicker(24 * time.Hour)
     
     // Run open ports check immediately once at startup
