@@ -301,8 +301,8 @@ func main() {
     // Force garbage collection before entering main loop
     debug.FreeOSMemory()
     
-    // Create a ticker for the open ports reporting (every 30 seconds)
-    portsTicker := time.NewTicker(30 * time.Second) // make this once a day ai!
+    // Create a ticker for the open ports reporting (once per day)
+    portsTicker := time.NewTicker(24 * time.Hour)
     
     // Run open ports check immediately once at startup
     go sendOpenPortsEvent(client, baseURL, authHeader)
