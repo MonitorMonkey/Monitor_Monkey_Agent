@@ -1,14 +1,14 @@
-package main
+package events
 
 import (
 	"bufio"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // ProcessCPUStat holds formatted CPU results for JSON output
@@ -24,14 +24,18 @@ type ProcessMemStat struct {
 	PID      int32  `json:"pid"`
 	Name     string `json:"name"`
 	Username string `json:"username"`
-	RSS_KB   uint64 `json:"rss_kb"` // Renamed from PeakRSS_KB
+	RSS_KB   uint64 `json:"rss_kb"`
 }
 
-// Result holds the final sorted lists for JSON output
-type Result struct {
-	TopCPUProcesses []ProcessCPUStat `json:"top_cpu_processes"`
-	TopMemProcesses []ProcessMemStat `json:"top_mem_processes"`
-}
+// Process data storage with mutex for thread safety
+var (
+	// Mutex for thread-safe access to process data
+	processDataMutex sync.Mutex
+	
+	// In-memory storage for process data
+	topCPUProcesses []ProcessCPUStat
+	topMemProcesses []ProcessMemStat
+)
 
 // getTopProcessesPS executes the 'ps' command to get top processes sorted by CPU or Memory.
 // metric: "cpu" or "mem"
@@ -47,8 +51,7 @@ func getTopProcessesPS(metric string, topN int) ([]ProcessCPUStat, []ProcessMemS
 		return nil, nil, fmt.Errorf("invalid metric for sorting: %s", metric)
 	}
 
-	// Use 'axo' for specific fields and 'comm' for command name (less likely to have spaces than 'args')
-	// Sorting is done by ps itself.
+	// Use 'axo' for specific fields and 'comm' for command name
 	cmd := exec.Command("ps", "axo", "pid,user,%cpu,rss,comm", "--sort="+sortKey)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -78,15 +81,12 @@ func getTopProcessesPS(metric string, topN int) ([]ProcessCPUStat, []ProcessMemS
 		user := fields[1]
 		cpuPercentStr := fields[2]
 		rssKBStr := fields[3]
-		// Command name might have spaces if 'comm' is longer than usual, but typically it's the last field here.
-		// If 'comm' gets truncated and has spaces, this might need adjustment.
-		// For simplicity, assume fields[4] is the command name.
+		// Command name might have spaces if 'comm' is longer than usual
 		name := fields[4]
 		if len(fields) > 5 {
-			// If command name was split, rejoin it (basic attempt)
+			// If command name was split, rejoin it
 			name = strings.Join(fields[4:], " ")
 		}
-
 
 		pid, err := strconv.ParseInt(pidStr, 10, 32)
 		if err != nil {
@@ -119,7 +119,7 @@ func getTopProcessesPS(metric string, topN int) ([]ProcessCPUStat, []ProcessMemS
 				PID:      int32(pid),
 				Name:     name,
 				Username: user,
-				RSS_KB:   rssKB, // ps 'rss' is already in KB
+				RSS_KB:   rssKB,
 			})
 		}
 		count++
@@ -130,7 +130,7 @@ func getTopProcessesPS(metric string, topN int) ([]ProcessCPUStat, []ProcessMemS
 	}
 
 	if err := cmd.Wait(); err != nil {
-		// Ignore exit errors if we still got some data, ps might return error if some processes vanished
+		// Ignore exit errors if we still got some data, ps might return error if processes vanished
 		if count == 0 {
 			return nil, nil, fmt.Errorf("ps command failed: %w", err)
 		}
@@ -140,41 +140,66 @@ func getTopProcessesPS(metric string, topN int) ([]ProcessCPUStat, []ProcessMemS
 	return cpuStats, memStats, nil
 }
 
+// CollectProcesses collects top processes and stores them in memory
+func CollectProcesses(topN int) error {
+    // Get current top CPU processes
+    cpuStats, _, err := getTopProcessesPS("cpu", topN)
+    if err != nil {
+        return fmt.Errorf("failed to get top CPU processes: %w", err)
+    }
+    
+    // Get current top Memory processes - THIS WAS MISSING!
+    _, memStats, err := getTopProcessesPS("mem", topN)
+    if err != nil {
+        return fmt.Errorf("failed to get top Memory processes: %w", err)
+    }
+    
+    // Update the in-memory storage with mutex lock for thread safety
+    processDataMutex.Lock()
+    defer processDataMutex.Unlock()
+    
+    // Replace existing data with new data
+    topCPUProcesses = cpuStats
+    topMemProcesses = memStats
+    
+    return nil
+}
 
-func main() {
-	topNFlag := flag.Int("top", 10, "Number of top processes to report for CPU and Memory")
-	flag.Parse()
-
-	topN := *topNFlag
-	if topN <= 0 {
-		log.Fatalf("Invalid topN value: %d", topN)
+// GetProcessesJSON returns the current process data as JSON
+func GetProcessesJSON(metric string) (string, error) {
+	processDataMutex.Lock()
+	defer processDataMutex.Unlock()
+	
+	if metric == "cpu" {
+		if len(topCPUProcesses) == 0 {
+			return "", fmt.Errorf("no CPU process data collected yet")
+		}
+		jsonData, err := json.Marshal(topCPUProcesses)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal CPU stats to JSON: %w", err)
+		}
+		return string(jsonData), nil
+	} else if metric == "mem" {
+		if len(topMemProcesses) == 0 {
+			return "", fmt.Errorf("no Memory process data collected yet")
+		}
+		jsonData, err := json.Marshal(topMemProcesses)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal Memory stats to JSON: %w", err)
+		}
+		return string(jsonData), nil
 	}
+	
+	return "", fmt.Errorf("invalid metric: %s", metric)
+}
 
-	log.Printf("Getting top %d processes by CPU and Memory using 'ps'", topN)
-
-	// Get Top CPU Processes
-	cpuStats, _, errCPU := getTopProcessesPS("cpu", topN)
-	if errCPU != nil {
-		log.Fatalf("Failed to get top CPU processes: %v", errCPU)
-	}
-
-	// Get Top Memory Processes
-	_, memStats, errMem := getTopProcessesPS("mem", topN)
-	if errMem != nil {
-		log.Fatalf("Failed to get top Memory processes: %v", errMem)
-	}
-
-	// --- Prepare Final Output ---
-	result := Result{
-		TopCPUProcesses: cpuStats,
-		TopMemProcesses: memStats,
-	}
-
-	// Marshal to JSON and print
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		log.Fatalf("Failed to marshal result to JSON: %v", err)
-	}
-
-	fmt.Println(string(jsonData))
+// ClearProcessData clears the in-memory process data after sending
+// This helps with garbage collection
+func ClearProcessData() {
+	processDataMutex.Lock()
+	defer processDataMutex.Unlock()
+	
+	// Clear slices to allow garbage collection
+	topCPUProcesses = nil
+	topMemProcesses = nil
 }

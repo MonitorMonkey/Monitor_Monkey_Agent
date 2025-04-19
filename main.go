@@ -3,13 +3,14 @@
 // 0.6.0 - now displays --version and --status to support upgrade script
 // 0.6.1 - Memory optimisation
 // 0.6.2 - Added open ports event monitoring
+// 0.6.3 - Added process monitoring for CPU and Memory usage (in-memory storage)
 package main
 
 import (
     "fmt"
     "go_monitor/monitors"
     "go_monitor/helpers"
-    "go_monitor/events" // Import the events package
+    "go_monitor/events" 
     "time"
     "encoding/json"
     "net/http"
@@ -18,10 +19,11 @@ import (
     "io"
     "flag"
     "runtime/debug"
+    "strconv"
 )
 
 // Version information
-const AgentVersion = "0.6.2" 
+const AgentVersion = "0.6.3" 
 
 type Custom struct {
     Disks []string
@@ -50,20 +52,6 @@ type mesure struct {
 
 func log(to_log error) {
     fmt.Println(to_log)
-    /*
-    DEBUG := true
-    syslog, err := syslog.New(syslog.LOG_ERR, "monit")
-    if err != nil {
-        fmt.Println("Unable to connect to syslog daemon")
-    }
-    defer syslog.Close()
-
-    if DEBUG == true {
-        fmt.Println(to_log)
-    } else {
-        syslog.Err(to_log.Error())
-    }
-    */
 }
 
 // sendOpenPortsEvent gets open ports information and sends it to the events API
@@ -128,6 +116,122 @@ func sendOpenPortsEvent(client *http.Client, baseURL string, authHeader string) 
     }
 }
 
+// sendProcessesEvent sends process data to the events API
+func sendProcessesEvent(client *http.Client, baseURL string, authHeader string, metric string) {
+    // Get host ID and other details
+    hostid, _, _, _, _, _ := monitors.GetHostDetails()
+    
+    // Get the process data from memory
+    jsonData, err := events.GetProcessesJSON(metric)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error getting %s processes data: %v\n", metric, err)
+        return
+    }
+    
+    // Parse the JSON string back to a map for embedding in event data
+    var processData interface{}
+    err = json.Unmarshal([]byte(jsonData), &processData)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error parsing %s processes data: %v\n", metric, err)
+        return
+    }
+    
+    // Create event payload
+    eventType := ""
+    if metric == "cpu" {
+        eventType = "processes_cpu"
+    } else if metric == "mem" {
+        eventType = "processes_mem"
+    } else {
+        fmt.Fprintf(os.Stderr, "Invalid metric: %s\n", metric)
+        return
+    }
+    
+    eventPayload := map[string]interface{}{
+        "Hostid":     hostid,
+        "EventType":  eventType,
+        "EventData":  processData,
+    }
+    
+    // Marshal the payload
+    jsonBytes, err := json.Marshal(eventPayload)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error marshaling event data: %v\n", err)
+        return
+    }
+    
+    // Create and send the request
+    eventsApi := baseURL + "/api/events/"
+    req, err := http.NewRequest("POST", eventsApi, bytes.NewBuffer(jsonBytes))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+        return
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", authHeader)
+    
+    resp, err := client.Do(req)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error sending event: %v\n", err)
+        return
+    }
+    defer resp.Body.Close()
+    
+    // Log success or failure
+    if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+        fmt.Printf("Successfully sent %s processes event at %s\n", metric, time.Now().Format(time.RFC3339))
+    } else {
+        body, _ := io.ReadAll(resp.Body)
+        fmt.Fprintf(os.Stderr, "Failed to send %s processes event. Status: %d, Response: %s\n", 
+            metric, resp.StatusCode, string(body))
+    }
+}
+
+// sendProcessesEvents collects and sends both CPU and Memory process data to the events API
+func sendProcessesEvents(client *http.Client, baseURL string, authHeader string) {
+    // Send CPU processes
+    sendProcessesEvent(client, baseURL, authHeader, "cpu")
+    
+    // Send Memory processes
+    sendProcessesEvent(client, baseURL, authHeader, "mem")
+    
+    // Clear process data after sending to help with garbage collection
+    events.ClearProcessData()
+    
+    // Force garbage collection
+    debug.FreeOSMemory()
+}
+
+// collectProcessData collects process data on a regular schedule (more frequently than sending)
+func collectProcessData(interval time.Duration, stopChan <-chan struct{}) {
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+    
+    // Collect initial data
+    err := events.CollectProcesses(10) // Get top 10 processes
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error in initial process data collection: %v\n", err)
+    } else {
+        fmt.Println("Initial process data collection completed")
+    }
+    
+    for {
+        select {
+        case <-ticker.C:
+            // Update process data periodically
+            err := events.CollectProcesses(10) // Get top 10 processes
+            if err != nil {
+                fmt.Fprintf(os.Stderr, "Error collecting processes: %v\n", err)
+            } else {
+                fmt.Println("Process data updated at", time.Now().Format(time.RFC3339))
+            }
+        case <-stopChan:
+            return
+        }
+    }
+}
+
 func main() {
     // Set up a recovery function to prevent crashes
     defer func() {
@@ -184,7 +288,7 @@ func main() {
     //const baseURL = "http://192.168.1.131:8000"
 
     var (
-        updateApi  = baseURL + "/api/update/"
+        updateApi = baseURL + "/api/update/"
         confApi = baseURL + "/api/configure/"
     )
 
@@ -199,6 +303,35 @@ func main() {
         },
     }
 
+    // Set up process monitoring
+    // Default collection interval: 5 minutes (to catch most significant activity)
+    processCollectionInterval := 5 * time.Minute
+    
+    // Default sending interval: 24 hours
+    processSendInterval := 24 * time.Hour
+    
+    // Environment variable overrides for development (now in seconds)
+    if envInterval := os.Getenv("PROCESS_COLLECTION_INTERVAL"); envInterval != "" {
+        if seconds, err := strconv.Atoi(envInterval); err == nil && seconds > 0 {
+            processCollectionInterval = time.Duration(seconds) * time.Second
+            fmt.Printf("Using custom process collection interval: %d seconds\n", seconds)
+        }
+    }
+    
+    if envInterval := os.Getenv("PROCESS_SEND_INTERVAL"); envInterval != "" {
+        if seconds, err := strconv.Atoi(envInterval); err == nil && seconds > 0 {
+            processSendInterval = time.Duration(seconds) * time.Second
+            fmt.Printf("Using custom process send interval: %d seconds\n", seconds)
+        }
+    }
+    
+    fmt.Println("Process monitoring: Collection every", processCollectionInterval, "| Sending every", processSendInterval)
+    fmt.Println("For testing, set PROCESS_COLLECTION_INTERVAL and PROCESS_SEND_INTERVAL env vars (in seconds)")
+    
+    // Start process data collection in a goroutine
+    stopProcessCollection := make(chan struct{})
+    go collectProcessData(processCollectionInterval, stopProcessCollection)
+    
     // TODO:
     // Disks should be configured on agent boot for defaults
     // e.g just send all disks
@@ -301,10 +434,12 @@ func main() {
     // Force garbage collection before entering main loop
     debug.FreeOSMemory()
     
-    // Create a ticker for the open ports reporting (once per day)
-	// unsure if do little but we see!
-	// well it also do it on boot so maybe fine?
-    portsTicker := time.NewTicker(24 * time.Hour)
+    // Set up monitoring intervals
+    portsCheckInterval := 24 * time.Hour
+    
+    // Create tickers for periodic tasks
+    portsTicker := time.NewTicker(portsCheckInterval)
+    processesTicker := time.NewTicker(processSendInterval)
     
     // Run open ports check immediately once at startup
     go sendOpenPortsEvent(client, baseURL, authHeader)
@@ -416,10 +551,12 @@ func main() {
                 debug.FreeOSMemory()
             }
             
-            // Check if it's time to send open ports event (non-blocking)
+            // Check if it's time to send events (non-blocking)
             select {
             case <-portsTicker.C:
-                go sendOpenPortsEvent(client, baseURL, authHeader) // Run in a goroutine to avoid blocking the main loop
+                go sendOpenPortsEvent(client, baseURL, authHeader)
+            case <-processesTicker.C:
+                go sendProcessesEvents(client, baseURL, authHeader)
             default:
                 // Continue with the main loop
             }
