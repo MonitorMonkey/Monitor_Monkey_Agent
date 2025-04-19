@@ -24,7 +24,7 @@ import (
 )
 
 // Version information
-const AgentVersion = "0.6.3" 
+const AgentVersion = "0.6.4" 
 
 type Custom struct {
     Disks []string
