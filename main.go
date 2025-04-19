@@ -443,6 +443,16 @@ func main() {
     
     // Run open ports check immediately once at startup
     go sendOpenPortsEvent(client, baseURL, authHeader)
+    
+    // Collect and send initial process data immediately at startup
+    fmt.Println("Collecting initial process data...")
+    err = events.CollectProcesses(10) // Collect top 10
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error collecting initial process data: %v\n", err)
+    } else {
+        fmt.Println("Sending initial process data...")
+        go sendProcessesEvents(client, baseURL, authHeader) // Send in a goroutine to avoid blocking startup
+    }
 
     // Main monitoring loop
     for {
