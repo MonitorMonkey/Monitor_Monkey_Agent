@@ -11,7 +11,8 @@ import (
     "fmt"
     "go_monitor/monitors"
     "go_monitor/helpers"
-    "go_monitor/events" 
+    "go_monitor/events"
+    "go_monitor/custom"
     "time"
     "encoding/json"
     "net/http"
@@ -24,7 +25,7 @@ import (
 )
 
 // Version information
-const AgentVersion = "0.6.4" 
+const AgentVersion = "0.6.5" 
 
 type Custom struct {
     Disks []string
@@ -441,6 +442,10 @@ func main() {
     // Create tickers for periodic tasks
     portsTicker := time.NewTicker(portsCheckInterval)
     processesTicker := time.NewTicker(processSendInterval)
+    
+    // Initialize custom alerts monitor
+    alertMonitor := custom.NewAlertMonitor(client, baseURL, authHeader, Hostid)
+    alertMonitor.Start()
     
     // Run open ports check immediately once at startup
     go sendOpenPortsEvent(client, baseURL, authHeader)

@@ -59,7 +59,11 @@ fi
 
 # Create deploy directory and set permissions
 mkdir -p "$DEPLOY_LOCATION"
+# Create custom events directory
+mkdir -p "$DEPLOY_LOCATION/custom-events"
 chown "$SERVICE_USER:$SERVICE_GROUP" "$DEPLOY_LOCATION"
+chown "$SERVICE_USER:$SERVICE_GROUP" "$DEPLOY_LOCATION/custom-events"
+chmod 755 "$DEPLOY_LOCATION/custom-events"
 
 # Download agent
 echo "Downloading agent from $AGENT_URL..."
