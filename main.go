@@ -5,6 +5,7 @@
 // 0.6.2 - Added open ports event monitoring
 // 0.6.3 - Added process monitoring for CPU and Memory usage (in-memory storage)
 // 0.6.4 - Sends Processs CPU/Mem on boot to populate frontend nicely
+// 0.7.0 - Custom alerting
 package main
 
 import (
