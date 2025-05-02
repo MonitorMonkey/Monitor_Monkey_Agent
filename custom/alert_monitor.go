@@ -121,9 +121,15 @@ func (am *AlertMonitor) loadAlerts() {
 		return
 	}
 	
-	// Reset alerts map
+	// Store existing timestamps before we reset the alerts map
+	lastSentTimes := make(map[string]time.Time)
 	am.mutex.Lock()
-	am.alerts = make(map[string]*AlertDefinition)
+	for path, alert := range am.alerts {
+		lastSentTimes[path] = alert.LastSent
+	}
+	
+	// Create new alerts map but don't immediately assign it
+	newAlerts := make(map[string]*AlertDefinition)
 	am.mutex.Unlock()
 	
 	// Process each file
@@ -131,12 +137,20 @@ func (am *AlertMonitor) loadAlerts() {
 		if alert, err := am.parseAlertFile(file); err != nil {
 			fmt.Fprintf(os.Stderr, "Error parsing alert file %s: %v\n", file, err)
 		} else {
-			am.mutex.Lock()
-			am.alerts[file] = alert
-			am.mutex.Unlock()
+			// Preserve the LastSent timestamp if this alert existed before
+			if lastSent, exists := lastSentTimes[file]; exists {
+				alert.LastSent = lastSent
+			}
+			
+			newAlerts[file] = alert
 			fmt.Printf("Loaded alert: %s, interval: %v\n", alert.Name, alert.Interval)
 		}
 	}
+	
+	// Update the alerts map with the new version
+	am.mutex.Lock()
+	am.alerts = newAlerts
+	am.mutex.Unlock()
 }
 
 // parseAlertFile reads and parses a .mm file
